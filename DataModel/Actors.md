@@ -1,3 +1,4 @@
+```mermaid
 flowchart LR
   %% ACTORS
   Doctor((Doctor/Surgeon))
@@ -59,3 +60,4 @@ flowchart LR
 
   DB -->|de-identified| Analytics
   Analytics -->|risk flags| FF
+```
