@@ -17,7 +17,7 @@ flowchart LR
 
   %% SYSTEM
   subgraph ClinPlatform[Clinician Platform]
-    FF["FlutterFlow Clinical App"]
+    FF["Clinical App"]
     Auth["Supabase Auth<br/>(JWT: org_id, roles[], attrs)"]
     DB["Supabase Postgres<br/>Row-Level Security"]
     Storage["Supabase Storage<br/>PHI media"]
