@@ -236,9 +236,6 @@ erDiagram
       int priority
     }
 
-    %% Notes:
-    %% - Enums like status values (e.g., inpatient/discharged/monitoring) and UNIQUE/INDEX constraints
-    %%   aren’t supported inline; document them here or in SQL.
-    %% - Where you had "FK -> table.id", Mermaid only supports the FK tag, not the reference target.
+    
 
 ```
