@@ -1,10 +1,10 @@
-# Clinician App Access & Data Model 
+#Clinician App Access & Data Model 
 
 This document explains the **actors model** (who interacts with the system and how) and the **entity relationship (ER) data model** (what data we store and how it’s related) for the Clinician-facing app. It focuses on a **hybrid RBAC + ABAC** authorization strategy using Supabase (Auth + Postgres + RLS[Need to figure out fine grained details]).
 
 ---
 
-## 1) Actors Model & an ER Model
+##1) Actors Model & an ER Model
 
 **Actors model:** clarifies *who* uses the system, *why* (goals), and *what* capabilities they need. It drives UX, workflow, and security boundaries (least-privilege).
 
