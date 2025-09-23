@@ -1,4 +1,4 @@
-``` mermaid
+```mermaid
 erDiagram
     ORGANIZATIONS ||--o{ DEPARTMENTS : has
     ORGANIZATIONS ||--o{ USERS : employs
@@ -23,13 +23,16 @@ erDiagram
     PATIENTS ||--o{ ASSIGNMENTS : linked_to
     USERS ||--o{ ASSIGNMENTS : assigned_to
 
+    %% Device lifecycle
+    DEVICES ||--o{ DEVICE_ASSIGNMENTS : assigned
+    PATIENTS ||--o{ DEVICE_ASSIGNMENTS : uses
+    DEVICES ||--o{ DEVICE_READINGS : produces
+    PATIENTS ||--o{ DEVICE_READINGS : receives
+
     PATIENTS ||--o{ ENCOUNTERS : has
     PATIENTS ||--o{ OBSERVATIONS : has
     USERS ||--o{ OBSERVATIONS : authored
     PATIENTS ||--o{ CARE_PLANS : guided_by
-
-    DEVICES ||--o{ DEVICE_READINGS : produces
-    PATIENTS ||--o{ DEVICE_READINGS : receives
 
     PATIENTS ||--o{ ALERTS : triggers
     USERS ||--o{ ALERTS : created_by
@@ -114,6 +117,15 @@ erDiagram
       timestamptz start_at
       timestamptz end_at
     }
+    DEVICE_ASSIGNMENTS {
+      uuid id PK
+      uuid org_id FK
+      uuid device_id FK
+      uuid patient_id FK
+      uuid assigned_by
+      timestamptz start_at
+      timestamptz end_at
+    }
     ENCOUNTERS {
       uuid id PK
       uuid patient_id FK
@@ -125,19 +137,24 @@ erDiagram
     DEVICES {
       uuid id PK
       uuid org_id FK
-      uuid patient_id
       text type
       text manufacturer
+      text model
       text serial
+      text firmware_version
+      text owned_by
       text status
+      timestamptz last_seen_at
     }
     DEVICE_READINGS {
       uuid id PK
+      uuid org_id FK
       uuid device_id FK
       uuid patient_id FK
       timestamptz captured_at
       text metric
       jsonb value_json
+      timestamptz created_at
     }
     OBSERVATIONS {
       uuid id PK
@@ -235,7 +252,5 @@ erDiagram
       jsonb condition_json
       int priority
     }
-
-    
 
 ```
