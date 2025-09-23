@@ -1,0 +1,312 @@
+# Clinician App Access & Data Model 
+
+This document explains the **actors model** (who interacts with the system and how) and the **entity relationship (ER) data model** (what data we store and how it’s related) for the Clinician-facing app. It focuses on a **hybrid RBAC + ABAC** authorization strategy using Supabase (Auth + Postgres + RLS[Need to figure out fine grained details]).
+
+---
+
+## 1) Actors Model & an ER Model
+
+**Actors model:** clarifies *who* uses the system, *why* (goals), and *what* capabilities they need. It drives UX, workflow, and security boundaries (least-privilege).
+
+**ER model:** defines *what* we store (organizations, users, patients, devices, alerts, etc.), how these relate, and where to enforce multi-tenancy, privacy, and lifecycle policies. It’s the foundation for **Row-Level Security (RLS)** and auditability.
+
+Together, they ensure:
+- **Safety:**  “minimum necessary” access - Need to map to HIPAA compliance.
+- **Scalability:** clean separation of tenants (orgs), roles, and permissions.
+- **Change-resilience:** roles/attributes can evolve without breaking data.
+
+---
+
+## 2) Actors (System Context)
+
+### Primary human actors
+- **Doctor / Surgeon** : Leads clinical decisions; needs full read/write on assigned patients, orders, care plans, alerts triage.
+- **Nurse** : Documents vitals/notes; monitors telemetry and alerts; interacts with patients day-to-day for assigned panels.
+- **Clinical Staff / Technician** : Performs procedures/tests; uploads results; limited write; read-only on broader PHI.
+- **Scheduler / Reception** : Manages appointments; minimal PHI exposure (demographics and schedule only).
+- **Department Admin** : Manages departmental rosters/assignments; operational dashboards; limited PHI.
+- **Org Admin** : Manages org-level users/roles; multi-department oversight; avoids PHI unless dual-role.
+- **IT Admin** : Platform configuration, integrations, keys, and service roles; no PHI by default (separation of duties).
+- **Compliance Officer / Auditor** : Reviews **Audit Logs** and de-identified exports; does not alter PHI.
+
+### System actors & integrations
+- **Patient (as system actor)** : Receives reminders; may be present in messaging threads.
+- **Device Ingestion Service** : Posts telemetry (Masimo, MedWand, AliveCor, scales, glucometers).
+- **EMR Integration** : ADT/HL7/FHIR(Need to check and confirm) flows for demographics, encounters, results.
+- **Telehealth Provider** : Launch/join sessions from clinician app.
+- **Notification Service** : SMS/email reminders and alerting (on-call, patient reminders).
+
+### Purpose & boundaries
+- Each actor’s **scope** is bounded by **organization**, **department**, and **patient assignment**.
+- **Least privilege**: only the capabilities required for that role, with **break-glass** for emergencies under strict logging.
+
+---
+
+## 3) High-Level Actors Diagram
+
+```mermaid
+flowchart LR
+  %% ACTORS
+  Doctor((Doctor/Surgeon))
+  Nurse((Nurse))
+  ClinStaff((Clinical Staff / Technician))
+  Scheduler((Scheduler / Reception))
+  DeptAdmin((Department Admin))
+  OrgAdmin((Org Admin))
+  ITAdmin((IT Admin))
+  Auditor((Compliance / Auditor))
+  Patient((Patient))
+  DeviceSvc(["Device Ingestion Service"])
+  EMR(["EMR Integration"])
+  Telehealth(["Telehealth Provider"])
+  Notify(["Notification Service (SMS/Email)"])
+
+  %% SYSTEM
+  subgraph ClinPlatform[Clinician Platform]
+    FF["FlutterFlow Clinical App"]
+    Auth["Supabase Auth<br/>(JWT: org_id, roles[], attrs)"]
+    DB["Supabase Postgres<br/>Row-Level Security"]
+    Storage["Supabase Storage<br/>PHI media"]
+    Edge["Supabase Edge Functions"]
+    Policy["ABAC Policy Engine<br/>(conditions: dept, shift, assignment, IP, break_glass)"]
+    Audit[["Audit Logger / SIEM"]]
+    Alerts[["Alert Orchestrator"]]
+    Analytics[["Risk Scoring / ML (future)"]]
+  end
+
+  %% FLOWS
+  Doctor --> FF
+  Nurse --> FF
+  ClinStaff --> FF
+  Scheduler --> FF
+  DeptAdmin --> FF
+  OrgAdmin --> FF
+  ITAdmin --> FF
+  Auditor --> FF
+
+  FF <--> Auth
+  Auth --> FF
+
+  FF --> DB
+  FF --> Storage
+  FF --> Edge
+  Edge --> DB
+  Edge --> Policy
+  Policy --> DB
+
+  FF --> Audit
+  DB --> Audit
+  Edge --> Alerts
+  Alerts --> Notify
+
+  Patient -->|SMS reminders| Notify
+  DeviceSvc -->|Device webhooks| Edge
+  EMR -->|ADT/HL7/FHIR| Edge
+  Telehealth -->|Launch / join| FF
+
+  DB -->|de-identified| Analytics
+  Analytics -->|risk flags| FF
+```
+
+**How it serves the product**
+- Defines all **entry points** (who logs in) and **data flows** (where PHI moves).
+- Shows where **Auth (JWT)** & **RLS** enforce least-privilege.
+- Reserves an **ABAC policy engine** for contextual decisions: on-shift, assignment, department, break-glass, IP allow-lists.
+
+---
+
+## 4) ER Diagram (Data Model)
+
+
+
+```mermaid
+erDiagram
+    ORGANIZATIONS ||--o{ DEPARTMENTS : has
+    ORGANIZATIONS ||--o{ USERS : employs
+    ORGANIZATIONS ||--o{ PATIENTS : owns
+    ORGANIZATIONS ||--o{ DEVICES : owns
+    ORGANIZATIONS ||--o{ ALERTS : tracks
+    ORGANIZATIONS ||--o{ MESSAGES : contains
+    ORGANIZATIONS ||--o{ APPOINTMENTS : schedules
+    ORGANIZATIONS ||--o{ AUDIT_LOGS : records
+    ORGANIZATIONS ||--o{ CONSENTS : governs
+    ORGANIZATIONS ||--o{ USER_SHIFTS : defines
+    ORGANIZATIONS ||--o{ ABAC_POLICIES : defines
+
+    DEPARTMENTS ||--o{ USERS : groups
+    DEPARTMENTS ||--o{ PATIENTS : treats
+
+    USERS ||--o{ USER_ROLES : has
+    ROLES ||--o{ USER_ROLES : assigned_to
+    ROLES ||--o{ ROLE_PERMISSIONS : grants
+    PERMISSIONS ||--o{ ROLE_PERMISSIONS : included_in
+
+    PATIENTS ||--o{ ASSIGNMENTS : linked_to
+    USERS ||--o{ ASSIGNMENTS : assigned_to
+
+    PATIENTS ||--o{ ENCOUNTERS : has
+    PATIENTS ||--o{ OBSERVATIONS : has
+    USERS ||--o{ OBSERVATIONS : authored
+    PATIENTS ||--o{ CARE_PLANS : guided_by
+
+    DEVICES ||--o{ DEVICE_READINGS : produces
+    PATIENTS ||--o{ DEVICE_READINGS : receives
+
+    PATIENTS ||--o{ ALERTS : triggers
+    USERS ||--o{ ALERTS : created_by
+    USERS ||--o{ ALERTS : assigned_to
+
+    USERS ||--o{ MESSAGES : sends
+    PATIENTS ||--o{ MESSAGES : about
+
+    USERS ||--o{ APPOINTMENTS : attends_as_clinician
+    PATIENTS ||--o{ APPOINTMENTS : attends_as_patient
+
+    USERS ||--o{ AUDIT_LOGS : actor
+
+    USERS ||--o{ USER_ATTRIBUTES : has
+    USERS ||--o{ BREAK_GLASS_EVENTS : initiates
+    PATIENTS ||--o{ BREAK_GLASS_EVENTS : subject
+```
+
+**Model purpose & what each part enables**
+- **Organizations / Departments** : Multi-tenant separation + departmental scoping (basis for `org_id` & `department_id` in RLS).
+- **Users / Roles / Permissions / Mappings** : Hybrid RBAC core ( Need to get more informaton of how and who can do what). Use **role_permissions** to avoid hard-coding.
+- **Patients / Assignments** : ABAC context: only clinicians assigned (or in same dept/on shift) can access a patient.
+- **Observations / CarePlans / Encounters** : Clinical documentation tied to patient.
+- **Devices / DeviceReadings** : Streaming telemetry + vitals; each reading linked to patient for RLS.
+- **Alerts / Messages / Appointments** : Operational workflows with creators/assignees (for accountability + access checks).
+- **Consents** : Enforce “can we collect/use X?” (telemetry, messaging, telehealth) before accessing features.
+- **AuditLogs** : Immutable trail for PHI access and admin changes (compliance & forensics).
+- **UserShifts / UserAttributes / BreakGlassEvents** : ABAC attributes (on-shift, location, emergency override) dynamically restricting or expanding access.
+- **ABACPolicies** : Optional: declarative conditions (Need to figure ou more implementation details`condition_json`, `priority`) to centralize complex context rules.
+
+---
+
+## 5) How RBAC + ABAC is handled across the lifecycle
+
+### Identity & onboarding
+1. **Provision user** in org; assign baseline **roles** (e.g., Doctor) and **department**.
+2. On first login, Supabase **JWT** includes `sub`, `org_id`, `roles[]`; optional snapshot attributes (e.g., `dept`).
+3. **RLS** enforces default-deny; user sees only their org, dept, and unprivileged views until assignments are made.
+
+### Assignment & duty cycle
+1. **Assignments** attach clinicians to patients (primary physician, nurse of record). RLS checks `(exists assignment where user_id & patient_id match)` for read/write.
+2. **UserShifts** constrain access by time (e.g., only during active shift). ABAC checks time window.
+3. **Dept scope** (e.g., Cardiology) permits read on *dept-wide* dashboards but write only on *assigned* patients.
+
+### Escalation & emergencies (break-glass)
+1. User triggers **break_glass** on a patient with reason (UI prompt + MFA recommended).
+2. ABAC raises privileges temporarily (read-only or limited write), **AuditLogs** record all access.
+3. Event must be approved or reviewed; auto-expire after a short window.
+
+### Role changes & offboarding
+1. Changes to roles/attributes recorded in DB; short-lived JWTs ensure quick **claim refresh**.
+2. Forced re-auth or `refreshSession()` to pick up new claims.
+3. Offboarding: revoke sessions, remove roles, disable user; historical **AuditLogs** retained.
+
+### Data lifecycle
+- **Patients**: create → active monitoring → discharged → archival.
+- **Telemetry**: continuous ingest; retention policies (e.g., hot vs. cold storage) with encryption at rest.
+- **Logs**: retained per compliance (e.g., 6 years), immutable store preferred.
+- **PHI exports**: de-identify for Analytics; enforce approvals and logging.
+
+---
+
+## 6) RLS & JWT patterns (illustrative)
+
+**JWT claims (custom):**
+```json
+{
+  "sub": "<user-uuid>",
+  "org_id": "<org-uuid>",
+  "user_roles": ["doctor", "dept_admin"],
+  "dept": "cardiology",
+  "on_shift": true,
+  "break_glass": false,
+  "exp": 1234567890
+}
+```
+
+**Policy patterns (pseudo-SQL):**
+```sql
+-- Patients: only org members; then refine by ABAC (assignment or dept+on_shift)
+CREATE POLICY patient_read ON patients
+FOR SELECT USING (
+  patients.org_id = current_setting('request.jwt.claims', true)::jsonb->>'org_id'
+  AND (
+    EXISTS (
+      SELECT 1 FROM assignments a
+      WHERE a.patient_id = patients.id AND a.user_id = auth.uid()
+    )
+    OR (
+      (current_setting('request.jwt.claims', true)::jsonb->>'dept') = patients.department_id::text
+      AND (current_setting('request.jwt.claims', true)::jsonb->>'on_shift')::boolean = true
+    )
+    OR (current_setting('request.jwt.claims', true)::jsonb->>'break_glass')::boolean = true
+  )
+);
+
+-- Observations: author can edit; doctors on the team can write; others read-only if permitted
+CREATE POLICY observation_write ON observations
+FOR UPDATE USING (
+  observations.author_user_id = auth.uid()
+  OR EXISTS (
+     SELECT 1 FROM assignments a
+     WHERE a.patient_id = observations.patient_id
+       AND a.user_id = auth.uid()
+       AND 'doctor' = ANY (string_to_array(current_setting('request.jwt.claims', true)::jsonb->>'user_roles', ','))
+  )
+);
+```
+
+> In production, need to keep policies simple and factor checks into **SQL functions** (e.g., `user_can_read_patient(patient_id)`) for reuse and clarity.
+
+---
+
+## 7) Practices Checklist - Expected(can add more)
+
+**Authorization & tenancy**
+- Default deny. Add explicit allow policies; test for every table with PHI.
+- Carry `org_id` on PHI tables; never return rows across orgs.
+- Use **short-lived access tokens** and refresh on role/assignment changes.
+- Keep **permissions in DB**, not in code; UI should reflect, but DB is the source of truth.
+
+**HIPAA & privacy (*. still need to figure out)**
+- Follow **minimum necessary**: tailor role permissions and column selections.
+- **Audit everything** that touches PHI (read, write, export, break-glass, admin changes).
+- Encrypt at rest + in transit; consider column-level encryption for especially sensitive identifiers.
+- Data retention and deletion policies documented and automated.
+
+**ABAC hygiene** (Listed Some,as we start implement can have full picture)
+- Limit the number of attributes; start with **assignment**, **dept**, **on_shift**, **break_glass**.
+- Drive attributes from the DB; include only safe snapshots in JWT.
+- Ensure **break-glass** requires MFA + reason + short TTL + high-visibility alerts.
+
+**Operations**
+- Separate **service role** (Edge Functions) from end-user roles; tightly scope secrets.
+- Migration discipline: versioned schema, backward-compatible auth policies where possible.
+- Access reviews: quarterly certification of roles and ABAC policies; rotate keys/secrets.
+- Load/scale: create the right indexes (e.g., `(patient_id, captured_at)` on readings), partition time-series if needed.
+
+**FlutterFlow integration**
+- Mirror permissions in UI (visibility/disable) *for UX*, but rely on **RLS** for enforcement.
+- Provide clear feedback: “You don’t have permission” vs silent failures.
+- Offer safe “Refresh access” flow after role changes.
+
+---
+
+## 8) What is expected ?
+- A clinician sees only **their** patients (or dept during shift) and can **do** only what their role allows.
+- Emergency access is possible without pager duty(or any other) to ops - but is **time-bound, logged, and reviewed**.
+- Adding a new device, department, or role requires **no app rewrite** - just data & policies.
+- Audit trails answer **who saw/changed what and when**.
+
+---
+
+## 9) Next steps 
+- Generate all tables and RLS policy stubs for the schema.
+- Define initial **role → permission** matrix for MVP (Doctor, Nurse, Scheduler, DeptAdmin, OrgAdmin, ITAdmin, Auditor).
+- Implement **assignment** and **on-shift** ABAC checks first; add **break-glass** in phase 2.
+- Set up **AuditLogs** ingestion into SIEM with alerting. (Not Priority)
+
