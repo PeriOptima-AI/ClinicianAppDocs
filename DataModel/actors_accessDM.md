@@ -31,7 +31,7 @@ Together, they ensure:
 
 ### System actors & integrations
 - **Patient (as system actor)** : Receives reminders; may be present in messaging threads.
-- **Device Ingestion Service** : Posts telemetry (Masimo, MedWand, AliveCor, scales, glucometers).
+- **Device Ingestion Service** : Posts telemetry (Masimo?[can be configured later]).
 - **EMR Integration** : ADT/HL7/FHIR(Need to check and confirm) flows for demographics, encounters, results.
 - **Telehealth Provider** : Launch/join sessions from clinician app.
 - **Notification Service** : SMS/email reminders and alerting (on-call, patient reminders).
