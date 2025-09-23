@@ -213,7 +213,7 @@ erDiagram
 
 ---
 
-## 6) RLS & JWT patterns (illustrative)
+## 6) RLS & JWT patterns
 
 **JWT claims (custom):**
 ```json
@@ -228,7 +228,7 @@ erDiagram
 }
 ```
 
-**Policy patterns (pseudo-SQL):**
+**Policy patterns (pseudo code):**
 ```sql
 -- Patients: only org members; then refine by ABAC (assignment or dept+on_shift)
 CREATE POLICY patient_read ON patients
