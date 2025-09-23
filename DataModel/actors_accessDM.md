@@ -1,4 +1,3 @@
-```mermaid
 #Clinician App Access & Data Model 
 
 This document explains the **actors model** (who interacts with the system and how) and the **entity relationship (ER) data model** (what data we store and how it’s related) for the Clinician-facing app. It focuses on a **hybrid RBAC + ABAC** authorization strategy using Supabase (Auth + Postgres + RLS[Need to figure out fine grained details]).
@@ -311,4 +310,3 @@ FOR UPDATE USING (
 - Implement **assignment** and **on-shift** ABAC checks first; add **break-glass** in phase 2.
 - Set up **AuditLogs** ingestion into SIEM with alerting. (Not Priority)
 
-```
