@@ -1,97 +1,96 @@
-````markdown
-# Supabase JWTs + Custom Claims — Concepts & Hands‑on Lab (RBAC + ABAC)
+# Supabase JWTs + Custom Claims — Concepts & Hands-on Lab (RBAC + ABAC)
 
-> This doc explains what JWTs are, how Supabase issues and validates them, how to add **custom claims** safely, how token TTL/validity works, and a step‑by‑step **lab** to implement and test hybrid **RBAC + ABAC** with Postgres RLS. Copy‑paste friendly; secure‑by‑default.
+> This doc explains what JWTs are, how Supabase issues and validates them, how to add **custom claims** safely, how token TTL/validity works, and a step-by-step **lab** to implement and test hybrid **RBAC + ABAC** with Postgres RLS. Copy-paste friendly; secure-by-default.
 
 ---
 
 ## 1) JWTs in 5 minutes
 
-**JWT (JSON Web Token)** is a compact, URL‑safe token used to convey a set of **claims** (facts) between parties. A JWT has three Base64URL sections:
+**JWT (JSON Web Token)** is a compact, URL-safe token with three parts:
 
-- **Header**: `{ alg, typ }` — e.g., `alg: "RS256"` or `HS256`.
-- **Payload (claims)**: e.g., `sub` (user id), `exp` (expiry), `iat` (issued at), plus any **custom claims**.
-- **Signature**: cryptographic proof the token was issued by a trusted authority and wasn’t tampered with.
+- **Header**: `{ alg, typ }` — e.g., `alg: "RS256"`.
+- **Payload (claims)**: e.g., `sub` (user id), `exp` (expiry), `iat` (issued at), plus **custom claims**.
+- **Signature**: proves the token was issued by Supabase and not altered.
 
-Supabase Auth (GoTrue) issues JWT **access tokens** for authenticated sessions. Postgres (via PostgREST / Supabase APIs) decodes them and enforces **Row‑Level Security (RLS)** using built‑in helpers like `auth.uid()` (current user id) and `auth.jwt()` (raw claims JSON).
+Supabase Auth issues JWTs as access tokens. Postgres decodes them and enforces **Row-Level Security (RLS)** with helpers like:
 
-> Key idea: **Never trust client‑controlled fields for authorization.** Use database state + RLS; treat JWT custom claims as hints or mirrors of server‑owned facts.
+- `auth.uid()` → current user ID
+- `auth.jwt()` → raw claims JSON
+
+> **Rule**: don’t trust client-set fields. Use DB state + RLS for enforcement. Custom claims are for hints/UI.
 
 ---
 
-## 2) Claims: standard vs. custom
+## 2) Claims
 
-- **Standard claims**: `sub`, `iss`, `aud`, `exp`, `iat`, etc.
-- **Supabase claims** (examples): `email`, `role` (db role, usually `authenticated`), and two metadata blobs:
-  - `app_metadata` — **server/admin‑managed**; safe for non‑sensitive hints.
-  - `user_metadata` — **user‑editable**; do **not** use for authorization.
-- **Custom claims**: additional fields you attach to the token (e.g., `tenant`, `feature_flags`). In Supabase, use **Auth Hooks** (custom access token hook) or server‑side admin APIs to influence what gets embedded.
-
-> **Best practice**: put the **source of truth** for permissions and attributes in **tables** (e.g., `user_roles`, `role_permissions`, `org_id` on rows). Only mirror into JWT for UI convenience; always re‑validate in RLS.
+- **Standard**: `sub`, `iss`, `aud`, `exp`, `iat`.
+- **Supabase**:
+  - `app_metadata` → server/admin-managed (safe).
+  - `user_metadata` → user-editable (not safe for auth).
+- **Custom**: fields you add (e.g., `tenant`, `feature_flags`) via Auth Hook or admin API.
 
 ---
 
 ## 3) Validity, TTL, rotation
 
-- **Access token (JWT)**: short‑lived; expiry controlled in **Project Settings → Auth**. Typical value: ~1 hour. The `exp` claim is authoritative.
-- **Refresh token**: long‑lived cookie that allows silent re‑authentication/rotation of access tokens while the user stays signed‑in. Rotate/revoke on sign‑out or policy.
-- **Practical checks**:
-  - Read `exp`/`iat` from `auth.jwt()` in SQL to verify TTL.
-  - Adjust expiry in Auth settings and re‑login to see new value.
-  - Remember: once issued, a JWT remains valid until `exp`, even if roles change — RLS will still evaluate on DB state; however, frontend may need **session refresh** to pick up new `app_metadata`.
+- **Access token**: short-lived (~1h by default). Controlled by `exp`.
+- **Refresh token**: long-lived; used to rotate access tokens. Revoked on sign-out.
+- **Checks**:
+  - Inspect `exp`/`iat` via `auth.jwt()`.
+  - Update expiry in Auth settings and re-login to test.
+  - Tokens remain valid until `exp` even if roles change.
 
 ---
 
-## 4) Designing hybrid RBAC + ABAC
+## 4) RBAC + ABAC
 
-**RBAC** answers: *who* (role/permissions). **ABAC** answers: *what* (attributes on data rows). Combine both:
+- **RBAC** = who (roles/permissions).  
+- **ABAC** = what (row attributes).  
 
-- Tables: `roles`, `permissions`, `role_permissions`, `user_roles` (scoped by org), and resource tables with attributes (`org_id`, `owner_id`, `sensitivity`, etc.).
-- RLS: grant `SELECT/INSERT/UPDATE/DELETE` if the **current user** has the required permission **and** the row’s attributes allow access.
+Combine both:
 
----
-
-## 5) Secure patterns & foot‑guns
-
-**Do**
-- Use `auth.uid()` and joins to your RBAC tables in RLS.
-- Wrap permission logic in stable SQL helpers, e.g., `has_perm(_perm, _org)`.
-- Keep `app_metadata` limited to admin‑set hints; rely on tables for enforcement.
-
-**Avoid**
-- Trusting `user_metadata` for authorization.
-- Encoding full permission matrices in JWT and skipping RLS.
-- Broad policies like `to authenticated using (true)`.
+- Tables: `roles`, `permissions`, `user_roles`, plus resource tables with attributes (`org_id`, `sensitivity`).
+- Policies: enforce role permissions + attribute conditions.
 
 ---
 
-## 6) Hands‑on Lab — Supabase JWT + Custom Claims + RLS (RBAC + ABAC)
+## 5) Secure patterns
+
+✅ Do:
+- Use `auth.uid()` + RLS joins.
+- Wrap logic in helpers (`has_perm`).
+- Keep `app_metadata` minimal/admin-only.
+
+❌ Don’t:
+- Trust `user_metadata`.
+- Skip RLS by overloading JWT claims.
+- Use `using (true)` in policies.
+
+---
+
+## 6) Hands-on Lab
 
 ### 6.1. Prereqs
-- Supabase project.
-- Studio access with SQL editor and Auth settings.
-- (Optional) Supabase Edge Functions enabled for admin operations.
+- Supabase project
+- SQL Editor
+- (Optional) Edge Functions for admin ops
 
-### 6.2. Create schema (organizations, users, roles, permissions)
+### 6.2. Schema
 
 ```sql
--- Enable pgcrypto / gen_random_uuid if not already
 create extension if not exists pgcrypto;
 
--- Multi‑tenancy
 create table if not exists public.organizations (
   id uuid primary key default gen_random_uuid(),
   name text not null
 );
 
--- Users mirror (FK to auth.users)
 create table if not exists public.users (
-  id uuid primary key,            -- = auth.users.id
+  id uuid primary key,
   primary_org_id uuid references public.organizations(id),
   created_at timestamptz default now()
 );
 
--- RBAC core
 create table if not exists public.roles (
   id serial primary key,
   name text unique not null
@@ -115,7 +114,6 @@ create table if not exists public.user_roles (
   primary key (user_id, org_id, role_id)
 );
 
--- Resource with attributes (ABAC)
 create table if not exists public.patients (
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references public.organizations(id),
@@ -124,7 +122,6 @@ create table if not exists public.patients (
   full_name text not null,
   created_at timestamptz default now()
 );
-````
 
 ### 6.3. RLS + helpers
 
@@ -172,7 +169,7 @@ using (
   sensitivity = 'high'
   and public.has_perm('patients.read.high', org_id)
 );
-```
+
 
 ### 6.4. Seed minimal data
 
@@ -196,8 +193,8 @@ on conflict do nothing;
 
 ### 6.5. Create a user & mirror row in `public.users`
 
-1. In **Auth → Users**, add a new user (email+password or magic link). After confirming, copy its **UUID**.
-2. Insert the mirror row and assign role membership:
+1) In **Auth → Users**, add a new user (email+password or magic link). After confirming, copy its **UUID**.
+2) Insert the mirror row and assign role membership:
 
 ```sql
 -- Mirror row
@@ -282,20 +279,20 @@ select auth.uid() as user_id,
 
 ### 6.9. End‑to‑end tests
 
-* **Test 1 — RBAC read allowed**: clinician reads assigned patients.
-* **Test 2 — ABAC override**: even without `patients.read`, clinician reads their assigned row.
-* **Test 3 — High sensitivity gate**: only visible with `patients.read.high` permission.
-* **Test 4 — Custom claim presence**: verify `tenant` and `features` appear in JWT.
-* **Test 5 — TTL**: adjust Auth expiry, sign out/in, verify `exp`.
+- **Test 1 — RBAC read allowed**: clinician reads assigned patients.
+- **Test 2 — ABAC override**: even without `patients.read`, clinician reads their assigned row.
+- **Test 3 — High sensitivity gate**: only visible with `patients.read.high` permission.
+- **Test 4 — Custom claim presence**: verify `tenant` and `features` appear in JWT.
+- **Test 5 — TTL**: adjust Auth expiry, sign out/in, verify `exp`.
 
 ---
 
 ## 7) FAQ
 
-* **Can I rely on custom claims alone for authorization?** No.
-* **Where store org/tenant membership?** In normalized tables (`user_roles`).
-* **Impersonate user for RLS testing?** Use API with that user’s session.
-* **What expires and when?** Access tokens per `exp`; refresh tokens rotated/revoked.
+- **Can I rely on custom claims alone for authorization?** No.
+- **Where store org/tenant membership?** In normalized tables (`user_roles`).
+- **Impersonate user for RLS testing?** Use API with that user’s session.
+- **What expires and when?** Access tokens per `exp`; refresh tokens rotated/revoked.
 
 ---
 
@@ -318,11 +315,11 @@ const { data: patients } = await supabase.from('patients').select('*')
 
 ## 9) Security checklist
 
-* [ ] Default‑deny RLS on all user tables.
-* [ ] Use helpers (`has_perm`) to avoid duplicated logic.
-* [ ] Keep sensitive decisions in DB state; custom claims only mirror.
-* [ ] Keep access tokens short‑lived.
-* [ ] Audit admin operations that change roles/claims.
+- [ ] Default‑deny RLS on all user tables.
+- [ ] Use helpers (`has_perm`) to avoid duplicated logic.
+- [ ] Keep sensitive decisions in DB state; custom claims only mirror.
+- [ ] Keep access tokens short‑lived.
+- [ ] Audit admin operations that change roles/claims.
 
 ---
 
@@ -349,6 +346,5 @@ drop table if exists public.roles;
 drop table if exists public.users;
 drop table if exists public.organizations;
 ```
+```
 
-```
-```
