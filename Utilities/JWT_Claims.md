@@ -122,7 +122,7 @@ create table if not exists public.patients (
   full_name text not null,
   created_at timestamptz default now()
 );
-
+```
 ### 6.3. RLS + helpers
 
 ```sql
@@ -169,7 +169,7 @@ using (
   sensitivity = 'high'
   and public.has_perm('patients.read.high', org_id)
 );
-
+```
 
 ### 6.4. Seed minimal data
 
