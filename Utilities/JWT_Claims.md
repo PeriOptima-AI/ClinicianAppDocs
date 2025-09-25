@@ -231,10 +231,24 @@ select '<USER_UUID>', '<ORG_UUID>', r.id from public.roles r where r.name='clini
 ### 6.6. Insert some data rows
 
 ```sql
-insert into public.patients(org_id, assigned_clinician, sensitivity, full_name)
-values
-  ('<ORG_UUID>', '<USER_UUID>', 'normal', 'Jane Patient'),
-  ('<ORG_UUID>', null, 'high', 'VIP Patient');
+-- Replace with the email of the Auth user you created
+with u as (
+  select id as user_id from auth.users where email = 'smalredd@ucsc.edu'
+),
+p as (
+  select p.id as patient_id
+  from public.patients p
+  join public.organizations o on o.id = p.org_id
+  where o.slug = 'acme' and p.mrn = 'MRN-001'
+)
+insert into public.assignments (patient_id, user_id, role_context)
+select p.patient_id, u.user_id, 'primary_clinician'
+from p, u
+where not exists (
+  select 1 from public.assignments a
+  where a.patient_id = p.patient_id and a.user_id = u.user_id and a.end_at is null
+);
+
 ```
 
 ### 6.7. Add **custom claims** safely
