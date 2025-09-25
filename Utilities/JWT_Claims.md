@@ -1,4 +1,4 @@
-````markdown
+```mermaid
 # Supabase JWTs + Custom Claims — Concepts & Hands‑on Lab (RBAC + ABAC)
 
 > This doc explains what JWTs are, how Supabase issues and validates them, how to add **custom claims** safely, how token TTL/validity works, and a step‑by‑step **lab** to implement and test hybrid **RBAC + ABAC** with Postgres RLS. Copy‑paste friendly; secure‑by‑default.
