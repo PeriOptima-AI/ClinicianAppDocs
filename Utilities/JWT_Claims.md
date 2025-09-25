@@ -322,16 +322,8 @@ select auth.uid() as user_id,
 
 ---
 
-## 7) FAQ
 
-- **Can I rely on custom claims alone for authorization?** No.
-- **Where store org/tenant membership?** In normalized tables (`user_roles`).
-- **Impersonate user for RLS testing?** Use API with that user’s session.
-- **What expires and when?** Access tokens per `exp`; refresh tokens rotated/revoked.
-
----
-
-## 8) Snippets: client‑side tests
+## 7) Snippets: client‑side tests
 
 ```ts
 import { createClient } from '@supabase/supabase-js'
