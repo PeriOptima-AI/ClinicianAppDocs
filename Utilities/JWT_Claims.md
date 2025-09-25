@@ -174,16 +174,15 @@ create policy patients_read_if_assigned
 on public.patients
 for select
 to authenticated
-using (assigned_clinician = auth.uid());
-
-drop policy if exists patients_read_high_sensitivity on public.patients;
-create policy patients_read_high_sensitivity
-on public.patients
-for select
-to authenticated
 using (
-  sensitivity = 'high'
-  and public.has_perm('patients.read.high', org_id)
+  exists (
+    select 1
+    from public.assignments a
+    where a.patient_id = patients.id
+      and a.user_id    = auth.uid()
+      and a.start_at  <= now()
+      and (a.end_at   is null or now() < a.end_at)
+  )
 );
 ```
 
