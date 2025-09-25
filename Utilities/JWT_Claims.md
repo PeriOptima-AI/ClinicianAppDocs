@@ -193,16 +193,22 @@ using (
 insert into public.organizations(name) values ('Acme Health') returning id;
 -- Copy the returned org UUID -> :ORG
 
--- Create permission catalog
-insert into public.permissions(name) values
-  ('patients.read'), ('patients.write'), ('patients.read.high')
-  on conflict do nothing;
+-- Create permission catalog (explicit resource + action required)
+insert into public.permissions (name, resource, action) values
+  ('patients.read',       'patients', 'read'),
+  ('patients.write',      'patients', 'write'),
+  ('patients.read.high',  'patients', 'read.high')
+on conflict (name) do nothing;
 
 -- Create a role and map permissions
-insert into public.roles(name) values ('clinician') on conflict do nothing;
+insert into public.roles(name) values ('clinician')
+on conflict (name) do nothing;
+
 insert into public.role_permissions(role_id, permission_id)
-select r.id, p.id from public.roles r, public.permissions p
-where r.name='clinician' and p.name in ('patients.read')
+select r.id, p.id
+from public.roles r
+join public.permissions p on p.name in ('patients.read')
+where r.name='clinician'
 on conflict do nothing;
 ```
 
