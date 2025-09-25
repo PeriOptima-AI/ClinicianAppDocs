@@ -145,26 +145,42 @@ returns boolean language sql stable as $$
 $$;
 
 -- Patients policies (RBAC)
-create policy if not exists patients_read_by_permission
-on public.patients for select to authenticated
+drop policy if exists patients_read_by_permission on public.patients;
+create policy patients_read_by_permission
+on public.patients
+for select
+to authenticated
 using (public.has_perm('patients.read', org_id));
 
-create policy if not exists patients_write_by_permission
-on public.patients for insert to authenticated
+drop policy if exists patients_write_by_permission on public.patients;
+create policy patients_write_by_permission
+on public.patients
+for insert
+to authenticated
 with check (public.has_perm('patients.write', org_id));
 
-create policy if not exists patients_update_by_permission
-on public.patients for update to authenticated
+drop policy if exists patients_update_by_permission on public.patients;
+create policy patients_update_by_permission
+on public.patients
+for update
+to authenticated
 using (public.has_perm('patients.write', org_id))
 with check (public.has_perm('patients.write', org_id));
 
 -- ABAC additions
-create policy if not exists patients_read_if_assigned
-on public.patients for select to authenticated
+
+drop policy if exists patients_read_if_assigned on public.patients;
+create policy patients_read_if_assigned
+on public.patients
+for select
+to authenticated
 using (assigned_clinician = auth.uid());
 
-create policy if not exists patients_read_high_sensitivity
-on public.patients for select to authenticated
+drop policy if exists patients_read_high_sensitivity on public.patients;
+create policy patients_read_high_sensitivity
+on public.patients
+for select
+to authenticated
 using (
   sensitivity = 'high'
   and public.has_perm('patients.read.high', org_id)
