@@ -1,6 +1,6 @@
 # Supabase JWTs + Custom Claims : Concepts & Hands-on Lab (RBAC + ABAC)
 
-> This doc explains what JWTs are, how Supabase issues and validates them, how to add **custom claims** safely, how token TTL/validity works, and a step-by-step **lab** to implement and test hybrid **RBAC + ABAC** with Postgres RLS. Copy-paste friendly; secure-by-default.
+> This doc explains what JWTs are, how Supabase issues and validates them, how to add **custom claims** safely, how token TTL/validity works, and a step-by-step **lab** to implement and test hybrid **RBAC + ABAC** with Postgres RLS.
 
 ---
 
@@ -56,12 +56,12 @@ Combine both:
 
 ## 5) Secure patterns
 
-✅ Do:
+Do:
 - Use `auth.uid()` + RLS joins.
 - Wrap logic in helpers (`has_perm`).
 - Keep `app_metadata` minimal/admin-only.
 
-❌ Don’t:
+Don’t:
 - Trust `user_metadata`.
 - Skip RLS by overloading JWT claims.
 - Use `using (true)` in policies.
