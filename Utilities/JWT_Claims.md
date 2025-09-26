@@ -156,7 +156,7 @@ begin
   return jsonb_build_object('claims', claims);
 
 exception when others then
-  -- Failsafe: don't break login if something goes wrong
+  -- Failsafe
   return jsonb_build_object('claims', coalesce(event->'claims','{}'::jsonb));
 end
 $$;
@@ -330,7 +330,7 @@ select public.custom_access_token_hook(
 
 ---
 
-## 9) Security model (why RLS still wins)
+## 9) Security model (why RLS)
 
 * JWT custom claims are **convenience** for the **UI**.
 * Real security comes from **RLS policies** that check **live DB state** (e.g., `user_roles`, `assignments`, row attributes).
