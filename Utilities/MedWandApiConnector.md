@@ -1,7 +1,7 @@
 
 ---
 
-# MedWand Exam Results Callback — Architecture, Code, Tests, and Debugging
+# MedWand Exam Results Callback : Architecture, Code, Tests, and Debugging
 
 ## 1) What triggers a callback?
 
