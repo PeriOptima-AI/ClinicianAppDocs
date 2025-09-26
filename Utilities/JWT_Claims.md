@@ -47,7 +47,7 @@ These are common, **UI-only** fields for multi-tenant/RBAC apps:
 * `department_id`, `department_slug`
 * `tenant` (display label)
 * `env`: `"prod" | "staging"`
-* `plan`: `"free" | "pro" | "enterprise"`
+
 
 ### Capability hints (UI toggles)
 
