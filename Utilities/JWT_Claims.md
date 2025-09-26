@@ -170,7 +170,7 @@ revoke execute on function public.custom_access_token_hook(jsonb) from authentic
 
 ---
 
-## 4) Optional: Change “active context” at runtime
+## 4) Optional for now: Change “active context” at runtime
 
 When a user switches org/department, update your mirror row and **refresh**:
 
@@ -262,7 +262,7 @@ select * from public.debug_my_claims();
 
 ---
 
-## 7) Extra patterns (optional)
+## 7) Extra patterns
 
 ### (a) Slim down the JWT (size budget)
 
