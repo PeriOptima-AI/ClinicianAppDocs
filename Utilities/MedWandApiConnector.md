@@ -9,9 +9,9 @@
 
 ---
 
-## 2) Callback configuration (MedWand console)
+## 2) Callback configuration (MedWand  support team)
 
-Configure these in MedWand:
+Provide these to MedWand Support:
 
 * **Callback URL**: HTTPS endpoint we control (our `results-receiver` Edge Function).
   Example: `https://<PROJECT-REF>.functions.supabase.co/results-receiver`
