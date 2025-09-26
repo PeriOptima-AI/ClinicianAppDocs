@@ -1,4 +1,4 @@
-# Supabase JWT **Custom Claims** & **Auth Hooks** — Engineering Guide (w/ FlutterFlow)
+# Supabase JWT **Custom Claims** & **Auth Hooks** — (w/ FlutterFlow)
 
 This doc shows **what you can add to a Supabase JWT**, how to build and register a **Custom Access Token Hook**, how to **read claims in FlutterFlow**, and how to keep security **in Postgres RLS**.
 
