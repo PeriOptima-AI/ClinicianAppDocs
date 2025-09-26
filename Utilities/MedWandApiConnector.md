@@ -41,7 +41,7 @@ Configure these in MedWand:
 
 ---
 
-## 4) Data model (minimal recap)
+## 4) Data model (minimal - will add more details)
 
 ```sql
 -- appointments: created/updated/deleted by our system; synced upstream
@@ -97,7 +97,7 @@ create table if not exists public.appointment_results (
 3. **Stream-first**: always upload raw to a **private Storage bucket** (e.g., `appointment-results/…`) before parsing/DB writes (robust for large payloads?).
 4. Upsert a **summary** row in `appointment_results`, linked to the matching `appointments` row by `appointment_id`.
 
-> Supabase docs: Edge Functions config & skipping JWT, Webhooks behavior.
+> Supabase docs: Edge Functions config, Webhooks behavior.
 
 **Drop-in code (TypeScript/Deno)**
 
