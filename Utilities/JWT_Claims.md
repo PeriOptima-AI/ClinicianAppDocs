@@ -1,10 +1,10 @@
-# Supabase JWTs + Custom Claims : Concepts & Hands-on Lab (RBAC + ABAC)
+# Supabase JWT **Custom Claims** & **Auth Hooks** — Engineering Guide (w/ FlutterFlow)
 
-> This doc explains what JWTs are, how Supabase issues and validates them, how to add **custom claims** safely, how token TTL/validity works, and a step-by-step **lab** to implement and test hybrid **RBAC + ABAC** with Postgres RLS.
+This doc shows **what you can add to a Supabase JWT**, how to build and register a **Custom Access Token Hook**, how to **read claims in FlutterFlow**, and how to keep security **in Postgres RLS**.
 
 ---
 
-## 1) JWTs in 5 minutes
+## 0) JWTs 
 
 **JWT (JSON Web Token)** is a compact, URL-safe token with three parts:
 
@@ -21,357 +21,319 @@ Supabase Auth issues JWTs as access tokens. Postgres decodes them and enforces *
 
 ---
 
-## 2) Claims
-
-- **Standard**: `sub`, `iss`, `aud`, `exp`, `iat`.
-- **Supabase**:
-  - `app_metadata` → server/admin-managed (safe).
-  - `user_metadata` → user-editable (not safe for auth).
-- **Custom**: fields you add (e.g., `tenant`, `feature_flags`) via Auth Hook or admin API.
+* Add **small, server-derived** facts to `claims.app_metadata` (e.g., `org_id`, `roles`, `features`) for **UI hints**.
+* **Never** authorize with JWT contents. Keep **RBAC/ABAC** in **RLS** tables/policies.
+* Hook lives in **`public`** schema, returns **`{"claims": {...}}`**, and is called by Supabase Auth at token issue time.
+* After changing hook/context, **refresh the session** to mint a new token.
 
 ---
 
-## 3) Validity, TTL, rotation
+## 1) JWT Claims: what’s there by default
 
-- **Access token**: short-lived (~1h by default). Controlled by `exp`.
-- **Refresh token**: long-lived; used to rotate access tokens. Revoked on sign-out.
-- **Checks**:
-  - Inspect `exp`/`iat` via `auth.jwt()`.
-  - Update expiry in Auth settings and re-login to test.
-  - Tokens remain valid until `exp` even if roles change.
+**Required claims** (examples): `iss`, `aud`, `exp`, `iat`, `sub`, `role`, `aal`, `session_id`, `email`, `phone`, `is_anonymous`
+**Optional claims**: `jti`, `nbf`, `amr`, `app_metadata`, `user_metadata`
+
+Your hook **must** return the `claims` object (you typically merge into `claims.app_metadata`). `user_metadata` is user-editable → do **not** use it for auth.
 
 ---
 
-## 4) RBAC + ABAC
+## 2) What to put in **app_metadata** (safe & useful)
 
-- **RBAC** = who (roles/permissions).  
-- **ABAC** = what (row attributes).  
+These are common, **UI-only** fields for multi-tenant/RBAC apps:
 
-Combine both:
+### Tenant & context
 
-- Tables: `roles`, `permissions`, `user_roles`, plus resource tables with attributes (`org_id`, `sensitivity`).
-- Policies: enforce role permissions + attribute conditions.
+* `org_id`, `org_slug`, `org_name` (short label)
+* `department_id`, `department_slug`
+* `tenant` (display label)
+* `env`: `"prod" | "staging"`
+* `plan`: `"free" | "pro" | "enterprise"`
+
+### Capability hints (UI toggles)
+
+* `roles`: `["nurse","doctor"]` (names only)
+* `perms`: `["patients.read","patients.write"]` (keep short)
+* `features`: `["clinician_ui","beta_notes"]`
+* `mfa_enforced`: `true/false`
+* `locale`: `"en-US"`, `theme`: `"light" | "dark"`
+
+### Session/ops signals
+
+* `auth_method`: e.g. `"password"`, `"sso/saml"`, `"magiclink"`
+* `session_tags`: like `["mobile","kiosk"]`
+* `limits`: e.g. `{ "max_upload_mb": 25 }`
+
+> **Avoid** PHI/PII, secrets, or big blobs. Aim to keep the whole JWT **< ~2 KB**.
 
 ---
 
-## 5) Secure patterns
+## 3) Build the Custom Access Token Hook
 
-Do:
-- Use `auth.uid()` + RLS joins.
-- Wrap logic in helpers (`has_perm`).
-- Keep `app_metadata` minimal/admin-only.
-
-Don’t:
-- Trust `user_metadata`.
-- Skip RLS by overloading JWT claims.
-- Use `using (true)` in policies.
-
----
-
-## 6) Hands-on Lab
-
-### 6.1. Prereqs
-- Supabase project
-- SQL Editor
-- (Optional) Edge Functions for admin ops
-
-### 6.2. Schema
+Create it in **`public`**, **SECURITY DEFINER**, and **return `{"claims": ...}`**.
 
 ```sql
-create extension if not exists pgcrypto;
+-- 3.1 Hook: add compact, UI-only facts to claims.app_metadata
+create or replace function public.custom_access_token_hook(event jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user   uuid := (event->>'user_id')::uuid;
+  v_org    uuid; 
+  v_dept   uuid; 
+  v_org_slug text; 
+  v_tenant text;
+  v_roles  jsonb := '[]'::jsonb;
+  v_perms  jsonb := '[]'::jsonb;
+  v_features jsonb := '[]'::jsonb;
+  claims   jsonb := coalesce(event->'claims','{}'::jsonb);
+  auth_method text := replace(coalesce(event->>'authentication_method',''), '"', '');
+begin
+  -- Active context from your mirror row (public.users)
+  select u.org_id, u.department_id
+    into v_org, v_dept
+  from public.users u
+  where u.id = v_user;
 
-create table if not exists public.organizations (
-  id uuid primary key default gen_random_uuid(),
-  name text not null
-);
+  -- Optional labels
+  if v_org is not null then
+    select o.slug, o.name into v_org_slug, v_tenant
+    from public.organizations o
+    where o.id = v_org;
+  end if;
 
-create table if not exists public.users (
-  id uuid primary key,
-  primary_org_id uuid references public.organizations(id),
-  created_at timestamptz default now()
-);
+  -- Role names for the active org
+  select coalesce(jsonb_agg(r.name order by r.name),'[]'::jsonb)
+    into v_roles
+  from public.user_roles ur
+  join public.roles r on r.id = ur.role_id
+  where ur.user_id = v_user
+    and (v_org is null or ur.org_id = v_org);
 
-create table if not exists public.roles (
-  id serial primary key,
-  name text unique not null
-);
+  -- Distinct permissions for the active org
+  select coalesce(jsonb_agg(distinct p.name order by p.name),'[]'::jsonb)
+    into v_perms
+  from public.user_roles ur
+  join public.role_permissions rp on rp.role_id = ur.role_id
+  join public.permissions p on p.id = rp.permission_id
+  where ur.user_id = v_user
+    and (v_org is null or ur.org_id = v_org);
 
-create table if not exists public.permissions (
-  id serial primary key,
-  name text unique not null
-);
+  -- Example feature flag
+  if v_roles ? 'doctor' or v_roles ? 'clinician' then
+    v_features := v_features || to_jsonb('clinician_ui');
+  end if;
 
-create table if not exists public.role_permissions (
-  role_id int references public.roles(id) on delete cascade,
-  permission_id int references public.permissions(id) on delete cascade,
-  primary key (role_id, permission_id)
-);
-
-create table if not exists public.user_roles (
-  user_id uuid references public.users(id) on delete cascade,
-  org_id uuid references public.organizations(id) on delete cascade,
-  role_id int references public.roles(id) on delete cascade,
-  primary key (user_id, org_id, role_id)
-);
-
-create table if not exists public.patients (
-  id uuid primary key default gen_random_uuid(),
-  org_id uuid not null references public.organizations(id),
-  assigned_clinician uuid references public.users(id),
-  sensitivity text check (sensitivity in ('low','normal','high')) default 'normal',
-  full_name text not null,
-  created_at timestamptz default now()
-);
-```
-### 6.3. RLS + helpers
-
-```sql
-alter table public.users enable row level security;
-alter table public.user_roles enable row level security;
-alter table public.patients enable row level security;
-
--- Permission helper
-create or replace function public.has_perm(_perm text, _org uuid)
-returns boolean language sql stable as $$
-  select exists (
-    select 1
-    from public.user_roles ur
-    join public.role_permissions rp on rp.role_id = ur.role_id
-    join public.permissions p on p.id = rp.permission_id
-    where ur.user_id = auth.uid()
-      and ur.org_id = _org
-      and p.name = _perm
+  -- Merge into claims.app_metadata (keep it small)
+  claims := jsonb_set(
+    claims, '{app_metadata}',
+    coalesce(claims->'app_metadata','{}'::jsonb) ||
+    jsonb_strip_nulls(jsonb_build_object(
+      'tenant',        v_tenant,
+      'org_id',        v_org,
+      'org_slug',      v_org_slug,
+      'department_id', v_dept,
+      'roles',         v_roles,
+      'perms',         v_perms,
+      'features',      v_features,
+      'auth_method',   nullif(auth_method,''),
+      'env',           'prod',
+      'plan',          'enterprise',
+      'locale',        'en-US',
+      'theme',         'light',
+      'mfa_enforced',  true
+    )),
+    true
   );
+
+  -- Ensure a jti exists (optional)
+  if not (claims ? 'jti') then
+    claims := jsonb_set(claims, '{jti}', to_jsonb(gen_random_uuid()::text), true);
+  end if;
+
+  return jsonb_build_object('claims', claims);
+
+exception when others then
+  -- Failsafe: don't break login if something goes wrong
+  return jsonb_build_object('claims', coalesce(event->'claims','{}'::jsonb));
+end
 $$;
 
--- Patients policies (RBAC)
-drop policy if exists patients_read_by_permission on public.patients;
-create policy patients_read_by_permission
-on public.patients
-for select
-to authenticated
-using (public.has_perm('patients.read', org_id));
+-- 3.2 Grants: only the Auth service should call the hook
+grant usage on schema public to supabase_auth_admin;
+grant execute on function public.custom_access_token_hook(jsonb) to supabase_auth_admin;
+revoke execute on function public.custom_access_token_hook(jsonb) from authenticated, anon, public;
+```
 
-drop policy if exists patients_write_by_permission on public.patients;
-create policy patients_write_by_permission
-on public.patients
-for insert
-to authenticated
-with check (public.has_perm('patients.write', org_id));
+**Register the hook:** Studio → **Auth → Hooks → Access token** → `public.custom_access_token_hook`.
 
-drop policy if exists patients_update_by_permission on public.patients;
-create policy patients_update_by_permission
-on public.patients
-for update
-to authenticated
-using (public.has_perm('patients.write', org_id))
-with check (public.has_perm('patients.write', org_id));
+---
 
--- ABAC additions
+## 4) Optional: Change “active context” at runtime
 
-drop policy if exists patients_read_if_assigned on public.patients;
-create policy patients_read_if_assigned
-on public.patients
-for select
-to authenticated
-using (
-  exists (
-    select 1
-    from public.assignments a
-    where a.patient_id = patients.id
-      and a.user_id    = auth.uid()
-      and a.start_at  <= now()
-      and (a.end_at   is null or now() < a.end_at)
+When a user switches org/department, update your mirror row and **refresh**:
+
+```sql
+create or replace function public.set_active_context(p_org uuid, p_department uuid default null)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- Guard: caller must be a member of this org[/dept]
+  if not exists (
+    select 1 from public.user_roles ur
+    where ur.user_id = auth.uid()
+      and ur.org_id  = p_org
+      and (p_department is null
+        or ur.department_id = p_department
+        or ur.department_id is null)
+  ) then
+    raise exception 'Not a member of this org/department.';
+  end if;
+
+  update public.users
+  set org_id = p_org, department_id = p_department
+  where id = auth.uid();
+end;
+$$;
+
+grant execute on function public.set_active_context(uuid, uuid) to authenticated;
+```
+
+**Client flow:** call `rpc('set_active_context', …)` → `await auth.refreshSession()` → read `user.appMetadata` again.
+
+---
+
+## 5) Read claims in Flutter/FlutterFlow
+
+```dart
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+final user = Supabase.instance.client.auth.currentUser;
+final meta = user?.appMetadata;
+
+final orgId  = meta?['org_id'] as String?;
+final deptId = meta?['department_id'] as String?;
+final roles  = (meta?['roles'] as List?)?.cast<String>() ?? const [];
+final perms  = (meta?['perms'] as List?)?.cast<String>() ?? const [];
+final tenant = meta?['tenant'] as String?;
+final features = (meta?['features'] as List?)?.cast<String>() ?? const [];
+final authMethod = meta?['auth_method'] as String?;
+```
+
+> After enabling/editing the hook, **sign out/in** or `await Supabase.instance.client.auth.refreshSession()` to mint a new token.
+
+---
+
+## 6) Server-side verification helper (what RLS “sees”)
+
+```sql
+create or replace function public.debug_my_claims()
+returns table(uid uuid, app_metadata jsonb, user_metadata jsonb, exp timestamptz)
+language sql stable as $$
+  select auth.uid(),
+         auth.jwt()->'app_metadata',
+         auth.jwt()->'user_metadata',
+         to_timestamp((auth.jwt()->>'exp')::bigint)
+$$;
+
+grant execute on function public.debug_my_claims() to authenticated;
+```
+
+From the app:
+
+```dart
+final out = await Supabase.instance.client.rpc('debug_my_claims');
+```
+
+**In Studio** (to simulate a user):
+
+```sql
+select set_config(
+  'request.jwt.claims',
+  '{"role":"authenticated","sub":"<USER_UUID>"}',
+  true
+);
+select * from public.debug_my_claims();
+```
+
+---
+
+## 7) Extra patterns (optional)
+
+### (a) Slim down the JWT (size budget)
+
+Keep only essential claims (respect required ones):
+
+```sql
+create or replace function public.custom_access_token_hook(event jsonb)
+returns jsonb language plpgsql as $$
+declare original jsonb := event->'claims'; new jsonb := '{}'::jsonb;
+        k text;
+begin
+  foreach k in array array['iss','aud','exp','iat','sub','role','aal','session_id','email','phone','is_anonymous'] loop
+    if original ? k then new := jsonb_set(new, array[k], original->k); end if;
+  end loop;
+  return jsonb_build_object('claims', new);
+end $$;
+```
+
+### (b) Add an `admin` flag from a table
+
+```sql
+create table if not exists public.profiles (
+  user_id uuid primary key references auth.users(id),
+  is_admin boolean not null default false
+);
+
+create or replace function public.custom_access_token_hook(event jsonb)
+returns jsonb language plpgsql as $$
+declare claims jsonb := coalesce(event->'claims','{}'::jsonb);
+        is_admin boolean := false;
+begin
+  select p.is_admin into is_admin from public.profiles p
+  where p.user_id = (event->>'user_id')::uuid;
+
+  if is_admin then
+    claims := jsonb_set(
+      claims, '{app_metadata,admin}', 'true'::jsonb, true
+    );
+  end if;
+
+  return jsonb_build_object('claims', claims);
+end $$;
+
+grant select on public.profiles to supabase_auth_admin;
+grant execute on function public.custom_access_token_hook(jsonb) to supabase_auth_admin;
+revoke execute on function public.custom_access_token_hook(jsonb) from authenticated, anon, public;
+```
+
+
+
+---
+
+**Simulate the hook directly (great for debugging):**
+
+```sql
+select public.custom_access_token_hook(
+  jsonb_build_object(
+    'user_id', '<USER_UUID>',
+    'claims', jsonb_build_object('role','authenticated'),
+    'authentication_method', 'password'
   )
 );
 ```
 
-### 6.4. Seed minimal data
-
-```sql
--- Org
-insert into public.organizations(name) values ('Acme Health') returning id;
--- Copy the returned org UUID -> :ORG
-
--- Create permission catalog (explicit resource + action required)
-insert into public.permissions (name, resource, action) values
-  ('patients.read',       'patients', 'read'),
-  ('patients.write',      'patients', 'write'),
-  ('patients.read.high',  'patients', 'read.high')
-on conflict (name) do nothing;
-
--- Create a role and map permissions
-insert into public.roles(name) values ('clinician')
-on conflict (name) do nothing;
-
-insert into public.role_permissions(role_id, permission_id)
-select r.id, p.id
-from public.roles r
-join public.permissions p on p.name in ('patients.read')
-where r.name='clinician'
-on conflict do nothing;
-```
-
-### 6.5. Create a user & mirror row in `public.users`
-
-1) In **Auth → Users**, add a new user (email+password or magic link). After confirming, copy its **UUID**.
-2) Insert the mirror row and assign role membership:
-
-```sql
--- Mirror row
-insert into public.users(id, primary_org_id) values ('<USER_UUID>', '<ORG_UUID>')
-  on conflict (id) do nothing;
-
--- Role membership for org
-insert into public.user_roles(user_id, org_id, role_id)
-select '<USER_UUID>', '<ORG_UUID>', r.id from public.roles r where r.name='clinician'
-  on conflict do nothing;
-```
-
-### 6.6. Insert some data rows
-
-```sql
--- Replace with the email of the Auth user you created
-with u as (
-  select id as user_id from auth.users where email = 'smalredd@ucsc.edu'
-),
-p as (
-  select p.id as patient_id
-  from public.patients p
-  join public.organizations o on o.id = p.org_id
-  where o.slug = 'acme' and p.mrn = 'MRN-001'
-)
-insert into public.assignments (patient_id, user_id, role_context)
-select p.patient_id, u.user_id, 'primary_clinician'
-from p, u
-where not exists (
-  select 1 from public.assignments a
-  where a.patient_id = p.patient_id and a.user_id = u.user_id and a.end_at is null
-);
-
-```
-
-### 6.7. Add **custom claims** safely
-
-**Option A — Auth Hook (Custom Access Token Hook)**
-
-```sql
-create or replace function auth.custom_access_token_hook(event jsonb)
-returns jsonb language plpgsql as $$
-declare
-  v_user_id uuid := (event->>'user_id')::uuid;
-  v_tenant text;
-  v_features jsonb := '[]'::jsonb;
-begin
-  select o.name into v_tenant
-  from public.users u
-  join public.organizations o on o.id = u.primary_org_id
-  where u.id = v_user_id;
-
-  if exists (
-    select 1 from public.user_roles ur
-    join public.roles r on r.id = ur.role_id and r.name = 'clinician'
-    where ur.user_id = v_user_id
-  ) then
-    v_features := jsonb_insert(v_features, '{0}', '"clinician_ui"');
-  end if;
-
-  return jsonb_build_object(
-    'app_metadata', jsonb_build_object(
-      'tenant', coalesce(v_tenant, 'unknown'),
-      'features', v_features
-    )
-  );
-end; $$;
-```
-
-Then, in **Auth → Hooks**, register `auth.custom_access_token_hook` for **access token** issuance.
-
-**Option B — Admin update (service role)**
-
-```ts
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-export async function setAppMetadata(userId: string, metadata: Record<string, any>) {
-  const supabase = createClient(DENO_ENV_SUPABASE_URL, DENO_ENV_SERVICE_ROLE_KEY);
-  const { data, error } = await supabase.auth.admin.updateUserById(userId, {
-    app_metadata: metadata,
-  });
-  if (error) throw error;
-  return data;
-}
-```
-
-### 6.8. Verify claims & TTL from SQL
-
-```sql
-select auth.uid() as user_id,
-       auth.jwt() -> 'app_metadata' ->> 'tenant' as tenant_claim,
-       auth.jwt() -> 'app_metadata' -> 'features'  as features,
-       to_timestamp( (auth.jwt() ->> 'iat')::bigint ) as issued_at,
-       to_timestamp( (auth.jwt() ->> 'exp')::bigint ) as expires_at;
-```
-
-### 6.9. End‑to‑end tests
-
-- **Test 1 — RBAC read allowed**: clinician reads assigned patients.
-- **Test 2 — ABAC override**: even without `patients.read`, clinician reads their assigned row.
-- **Test 3 — High sensitivity gate**: only visible with `patients.read.high` permission.
-- **Test 4 — Custom claim presence**: verify `tenant` and `features` appear in JWT.
-- **Test 5 — TTL**: adjust Auth expiry, sign out/in, verify `exp`.
-
 ---
 
+## 9) Security model (why RLS still wins)
 
-## 7) Snippets: client‑side tests
-
-```ts
-import { createClient } from '@supabase/supabase-js'
-const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)
-
-const { data: { user } } = await supabase.auth.getUser()
-const { data: session } = await supabase.auth.getSession()
-console.log('uid', user?.id)
-console.log('jwt exp', session?.session?.expires_at)
-console.log('claims', session?.session?.user?.app_metadata)
-
-const { data: patients } = await supabase.from('patients').select('*')
-```
+* JWT custom claims are **convenience** for the **UI**.
+* Real security comes from **RLS policies** that check **live DB state** (e.g., `user_roles`, `assignments`, row attributes).
+* Changes to roles/assignments take effect **immediately** (next query), regardless of what an old token says.
 
 ---
-
-## 9) Security checklist
-
-- [ ] Default‑deny RLS on all user tables.
-- [ ] Use helpers (`has_perm`) to avoid duplicated logic.
-- [ ] Keep sensitive decisions in DB state; custom claims only mirror.
-- [ ] Keep access tokens short‑lived.
-- [ ] Audit admin operations that change roles/claims.
-
----
-
-### Appendix: Quick teardown
-
-```sql
-drop policy if exists patients_read_high_sensitivity on public.patients;
-drop policy if exists patients_read_if_assigned on public.patients;
-drop policy if exists patients_update_by_permission on public.patients;
-drop policy if exists patients_write_by_permission on public.patients;
-drop policy if exists patients_read_by_permission on public.patients;
-
-alter table public.patients disable row level security;
-alter table public.user_roles disable row level security;
-alter table public.users disable row level security;
-
-drop function if exists public.has_perm(text, uuid);
-
-drop table if exists public.patients;
-drop table if exists public.user_roles;
-drop table if exists public.role_permissions;
-drop table if exists public.permissions;
-drop table if exists public.roles;
-drop table if exists public.users;
-drop table if exists public.organizations;
-```
-```
-
