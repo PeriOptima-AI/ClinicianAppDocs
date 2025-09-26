@@ -99,7 +99,7 @@ create table if not exists public.appointment_results (
 
 > Supabase docs: Edge Functions config, Webhooks behavior.
 
-**Drop-in code (TypeScript/Deno)**
+** code (TypeScript/Deno)**
 
 ```ts
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
