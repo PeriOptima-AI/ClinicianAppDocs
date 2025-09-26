@@ -45,7 +45,6 @@ Provide these to MedWand Support:
 
 ```sql
 -- appointments: created/updated/deleted by our system; synced upstream
--- (unchanged if you already applied earlier migrations)
 create table if not exists public.appointments (
   id uuid primary key default gen_random_uuid(),
   appointment_id text unique, -- we set to id::text as stable key for upstream
