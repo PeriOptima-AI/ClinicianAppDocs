@@ -140,7 +140,6 @@ begin
       'features',      v_features,
       'auth_method',   nullif(auth_method,''),
       'env',           'prod',
-      'plan',          'enterprise',
       'locale',        'en-US',
       'theme',         'light',
       'mfa_enforced',  true
